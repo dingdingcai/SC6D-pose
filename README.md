@@ -1,7 +1,7 @@
 # SC6D: Symmetry-agnostic and Correspondence-free 6D Object Pose Estimation (3DV 2022)
 - [Paper](https://arxiv.org/abs/2208.02129)
 <p align="center">
-    <img src ="assets/sc6d_overview.png" width="500" />
+    <img src ="assets/sc6d_overview.png" width="800" />
 </p>
 
 ``` Bash
