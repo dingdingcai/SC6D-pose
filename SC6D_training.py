@@ -18,7 +18,7 @@ from lib import warmup_lr
 import lib.geometry3D as geo
 from lib.data_utils import *
 from lib.visualization import *
-from lib import bop_network as network
+from lib import network as network
 
 from torch.utils.tensorboard import SummaryWriter
 

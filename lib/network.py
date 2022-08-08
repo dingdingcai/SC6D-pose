@@ -15,9 +15,9 @@ def convrelu(in_channels, out_channels, kernel_size=1, stride=1, padding=0):
 
 
 class SO3_Encoder(nn.Module):
-    def __init__(self, input_dim=6, emb_dim=128, num_classes=1):
+    def __init__(self, input_dim=9, so3_emb_dim=128, num_classes=1):
         super().__init__()
-        self.emb_dim = emb_dim
+        self.so3_emb_dim = so3_emb_dim
         self.input_dim = input_dim
         self.num_classes = num_classes
 
@@ -29,7 +29,7 @@ class SO3_Encoder(nn.Module):
         )
         self.encoders = [
             dict(
-                output_layer=nn.Conv1d(256, self.emb_dim, 1, 1),
+                output_layer=nn.Conv1d(256, self.so3_emb_dim, 1, 1),
             ) for _ in range(self.num_classes)
             ]
         # register decoder modules
@@ -40,7 +40,7 @@ class SO3_Encoder(nn.Module):
     def forward(self, input, obj_idx):
         """
         input:
-            samples of SO(3) Bx6xV
+            samples of SO(3) Bx9xV
         return:
             BxV
         """
@@ -49,9 +49,9 @@ class SO3_Encoder(nn.Module):
         
         out = []
         input = self.stem(input)
-        for x, dec_idx in zip(input, obj_idx): # Bx6xS, 
+        for x, dec_idx in zip(input, obj_idx): # Bx9xS, 
             encoder = self.encoders[dec_idx]
-            x = encoder['output_layer'](x[None, ...]) # 1x6xS   # obtain the corresponding batch feature and squeeze the feature dimension
+            x = encoder['output_layer'](x[None, ...]) # 1x9xS   # obtain the corresponding batch feature and squeeze the feature dimension
             out.append(x)
         return torch.cat(out, dim=0)
 
@@ -156,12 +156,12 @@ class ResNet34_AsymUNet(nn.Module):
 
 
 class PoseDecoder(nn.Module):
-    def __init__(self, R6d_emb_dim=64, rgb_emb_dim=64, depth_bins_num=500):
+    def __init__(self, so3_emb_dim=64, rgb_emb_dim=64, Tz_bins_num=1000):
         super().__init__()
         
-        self.R6d_emb_dim = R6d_emb_dim
+        self.so3_emb_dim = so3_emb_dim
         self.rgb_emb_dim = rgb_emb_dim
-        self.depth_bins_num = depth_bins_num
+        self.Tz_bins_num = Tz_bins_num
 
         self.conv_down_x8 = nn.Sequential(
             nn.Conv2d(self.rgb_emb_dim + 1, 128, 
@@ -215,7 +215,7 @@ class PoseDecoder(nn.Module):
             nn.Flatten(1), # BxCHW
             nn.Linear(128*8*8, 256),
             nn.ReLU(inplace=True),
-            nn.Linear(256, self.R6d_emb_dim)
+            nn.Linear(256, self.so3_emb_dim)
         )
         self.reg_Pxy = nn.Sequential(
             nn.Conv2d(128 * 8, 128, kernel_size=3, stride=2, padding=1),
@@ -234,30 +234,11 @@ class PoseDecoder(nn.Module):
             nn.Flatten(1), # BxCHW
             nn.Linear(128*8*8, 256),
             nn.ReLU(inplace=True),
-            nn.Linear(256, self.depth_bins_num)
+            nn.Linear(256, self.Tz_bins_num)
         )
         
-        # if self.enable_Tz_reg:
-        #     self.reg_Tz = nn.Sequential(
-        #         nn.Conv2d(128 * 8, 128, kernel_size=3, stride=2, padding=1),
-        #         nn.GroupNorm(num_groups=32, num_channels=128),
-        #         nn.ReLU(inplace=True),
-        #         nn.Flatten(1), # BxCHW
-        #         nn.Linear(128*8*8, 256),
-        #         nn.ReLU(inplace=True),
-        #         nn.Linear(256, 1)
-        #     )
-    def forward(self, rgb, uv=None, mask=None):
-        """
-        x: Bx(C1 + C2) x H/4 x W/4
-        """
-        if uv is not None:
-            x = torch.cat([rgb, uv], dim=1)         # BxCx64x64, Bx2x64x64
-        else:
-            x = rgb
-        if mask is not None:
-            x = torch.cat([x, mask], dim=1)         # BxCx64x64, Bx2x64x64
-
+    def forward(self, rgb, mask):
+        x = torch.cat([rgb, mask], dim=1)         # BxCx64x64, Bx2x64x64
         x = self.conv_down_x8(x)                # BxCxH/4xW/4 => Bx128xH/8xW/8
         x_x16 = self.conv_down_x16(x)           # Bx128xH/8xW/8 => Bx128xH/16xW/16
         x_pool = self.global_pool(x_x16)        # BxCxH/32xW/32 => BxCx1x1
@@ -289,21 +270,21 @@ class SC6D_Network(nn.Module):
     Zooming invariant Distance Discretization Light MultiHead SO3Encoder with MultiHead ResNet18_RGB_UV
 
     """
-    def __init__(self, num_classes=30, 
+    def __init__(self, num_classes, 
                        so3_input_dim=9, 
                        so3_emb_dim=32, 
                        rgb_emb_dim=32,
-                       depth_bins_num=200
+                       Tz_bins_num=1000
                        ):
         super(SC6D_Network, self).__init__()
         self.rgb_emb_dim = rgb_emb_dim
         self.so3_emb_dim = so3_emb_dim       # the embedding dimension of 3D rotation samples
         self.num_classes = num_classes
         self.so3_input_dim = so3_input_dim   # dimention of rotation parameters (R6d:6 or Rmat:9)
-        self.depth_bins_num = depth_bins_num
+        self.Tz_bins_num = Tz_bins_num
         
         self.so3_encoder = SO3_Encoder(
-            emb_dim=self.so3_emb_dim,
+            so3_emb_dim=self.so3_emb_dim,
             input_dim=self.so3_input_dim,
             num_classes=self.num_classes,
         )     # Bx so3_input_dim xN => Bx so3_emb_dim xN
@@ -316,8 +297,8 @@ class SC6D_Network(nn.Module):
         
         self.pose_decoder = PoseDecoder(
             rgb_emb_dim=self.rgb_emb_dim,
-            R6d_emb_dim=self.so3_emb_dim,
-            depth_bins_num=self.depth_bins_num,
+            so3_emb_dim=self.so3_emb_dim,
+            Tz_bins_num=self.Tz_bins_num,
 
         )
 
@@ -326,30 +307,21 @@ class SC6D_Network(nn.Module):
         """
         inputs:
             que_rgb: object RGB image, Bx3xHxW
-            que_xyz: object surface coordinate image, Bx3x64x64
             que_uv: pixel coordinate of RGB image, Bx2xHxW
-            # que_xyz: visible surface point coordinate, Bx3xhxw
-            que_R6d: 3D rotations of the input que_rgb, Bx6x1
-
-            key_xyz: object surface point coordinate, Bx3xK
-            key_R6d: uniformly sampled 3D rotations, Bx6xR
-
-            t3_xyz: uniform sampled 3D translation steps, Bx3xT
+            rotation_so3: 3D rotation samplings, Bx9xS
         """
         
-        so3_emb = self.so3_encoder(input=rotation_so3, obj_idx=obj_idx)            # Bx6xR => BxCxR 
-
-        assert (que_uv.shape[-1] == que_rgb.shape[-1]), (que_uv.shape, que_rgb.shape)
+        so3_sample_emb = self.so3_encoder(input=rotation_so3, obj_idx=obj_idx)            # Bx6xR => BxCxR 
         
         rgb_uv = torch.cat([que_rgb, que_uv], dim=1)
         rgb_emb, visib_msk = self.rgb_encoder(input=rgb_uv, decoder_idx=obj_idx) # BxCx64x64, Bx1x64x64
         
-        R6d_emb, delta_Pxy, cls_Tz = self.pose_decoder(rgb=rgb_emb, mask=visib_msk.sigmoid()) # BxC, Bx2, Bx1, BxK
+        img_rot_emb, delta_Pxy, cls_Tz = self.pose_decoder(rgb=rgb_emb, mask=visib_msk.sigmoid()) # BxC, Bx2, Bx1, BxK
 
-        R6d_emb = F.normalize(R6d_emb, dim=1)
-        so3_emb = F.normalize(so3_emb, dim=1)
+        img_rot_emb = F.normalize(img_rot_emb, dim=1)
+        so3_sample_emb = F.normalize(so3_sample_emb, dim=1)
 
-        return visib_msk, R6d_emb, delta_Pxy, cls_Tz, so3_emb
+        return visib_msk, img_rot_emb, delta_Pxy, cls_Tz, so3_sample_emb
 
 
 

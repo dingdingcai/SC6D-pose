@@ -863,12 +863,50 @@ def transform_to_local_ROIcrop(bbox_center, bbox_scale, zoom_scale=256):
             [0, r, -r * bxby[1]], 
             [0, 0, 1]]) 
         Ts_B2X.append(T_b2x)
+
     Ts_B2X = torch.stack(Ts_B2X, dim=0)
     if unsqueeze:
-        Ts_B2X = Ts_B2X.squeeze(0)    
+        Ts_B2X = Ts_B2X.squeeze(0)
     return Ts_B2X
 
 
 
+
+def rotation_from_Allo2Ego(obj_ray, cam_ray=torch.tensor([0.0, 0.0, 1.0])):
+    if not isinstance(obj_ray, torch.Tensor):
+        obj_ray = torch.as_tensor(obj_ray, dtype=torch.float32)
+    
+    unsqueeze = False
+    if obj_ray.dim() == 1:
+        unsqueeze = True
+        obj_ray = obj_ray[None, ...]
+    
+    if obj_ray.dim() == 2 and cam_ray.dim() == 1:
+        cam_ray = cam_ray[None, ...].repeat(len(obj_ray), 1)
+
+    assert(obj_ray.shape == cam_ray.shape), ' {} vs {} are mismatched.'.format(obj_ray.shape, cam_ray.shape)
+
+    dim_B = obj_ray.shape[0]
+    device = obj_ray.device
+    cam_ray = cam_ray.to(device)
+
+    obj_ray = F.normalize(obj_ray, dim=1, p=2) # Bx3
+    r_vec = torch.cross(cam_ray.repeat(dim_B, 1), obj_ray, dim=1) # Bx3
+
+    scalar = torch.sum(cam_ray.repeat(dim_B, 1) * obj_ray, dim=1) # B
+    r_mat = torch.zeros((dim_B, 3, 3)).to(device)
+
+    r_mat[:, 0, 1] = -r_vec[:, 2]
+    r_mat[:, 0, 2] =  r_vec[:, 1]
+    r_mat[:, 1, 0] =  r_vec[:, 2]
+    r_mat[:, 1, 2] = -r_vec[:, 0]
+    r_mat[:, 2, 0] = -r_vec[:, 1]
+    r_mat[:, 2, 1] =  r_vec[:, 0]
+
+    norm_r_mat2 = r_mat @ r_mat / (1 + scalar[..., None, None].repeat(1, 3, 3).to(device))  # Bx3x3
+    Rc = torch.eye(3)[None, ...].to(device).repeat(dim_B, 1, 1) + r_mat + norm_r_mat2
+    if unsqueeze:
+        Rc = Rc.squeeze(0)
+    return Rc
 
 
