@@ -20,8 +20,31 @@
 ## Setup
 Please start by installing [Miniconda3](https://conda.io/projects/conda/en/latest/user-guide/install/linux.html) with Pyhton3.8 or above.
 
+``` Bash
+git clone https://github.com/dingdingcai/SC6D-pose.git
+cd SC6D-pose
+unzip bop22_default_detections_and_segmentations.zip  ## detection results provided by the BOP Challenge 2022
+conda env create -f environment.yml
+conda activate sc6d
+pip install torch==1.8.0+cu111 torchvision==0.9.0+cu111 -f https://download.pytorch.org/whl/torch_stable.html
+pip install "git+https://github.com/facebookresearch/pytorch3d.git"
+python -m pip install detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cu111/torch1.8/index.html
+```
+
 ## Denpendencies
 This project requires the evaluation code from [bop_toolkit](https://github.com/thodan/bop_toolkit).
+
+
+## Dataset
+Our evaluation is conducted on three benchmark datasets all downloaded from [BOP website](https://bop.felk.cvut.cz/datasets). All three datasets are stored in the same directory, e.g. ``BOP_Dataset/tless, BOP_Dataset/ycbv, BOP_Dataset/itodd``, and set the "DATASET_ROOT" in the script config.py
+
+## Quantitative Evaluation
+``python inference.py --dataset_name tless --gpu_id 0`` evaluation on the model trained using only PBR images.
+``python inference.py --dataset_name tless --gpu_id 0 --eval_finetune`` evaluation on the model first trained using the PBR images and finetuned with the combined Synt+Real images
+
+## Training
+To train SC6D, downloading the [VOC2012](http://host.robots.ox.ac.uk/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar) dataset and setting the "VOC_BG_ROOT" in the script config.py
+``bash training.sh``  # change the "NAME" variable for training different dataset.
 
 
 # Acknowledgement
