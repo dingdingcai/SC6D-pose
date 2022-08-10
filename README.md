@@ -20,7 +20,6 @@ Please start by installing [Miniconda3](https://conda.io/projects/conda/en/lates
 ``` Bash
 git clone https://github.com/dingdingcai/SC6D-pose.git
 cd SC6D-pose
-unzip bop22_default_detections_and_segmentations.zip  ## detection results provided by the BOP Challenge 2022
 conda env create -f environment.yml
 conda activate sc6d
 pip install torch==1.8.0+cu111 torchvision==0.9.0+cu111 -f https://download.pytorch.org/whl/torch_stable.html
@@ -35,7 +34,11 @@ Our evaluation is conducted on three benchmark datasets all downloaded from [BOP
 This project requires the evaluation code from [bop_toolkit](https://github.com/thodan/bop_toolkit).
 
 
-## Quantitative Evaluation
+## Inference
+
+Decompress the detection results provided by the BOP Challenge 2022.
+- ``unzip bop22_default_detections_and_segmentations.zip``
+
 Evaluation on the model trained using only PBR images.
 - ``python inference.py --dataset_name tless --gpu_id 0``
 
@@ -47,7 +50,7 @@ To train SC6D, download the [VOC2012](http://host.robots.ox.ac.uk/pascal/VOC/voc
 - ``bash training.sh``  # change the "NAME" variable for training different dataset.
 
 
-# Acknowledgement
+## Acknowledgement
 - 1. The code is partially based on [GDR-Net](https://github.com/THU-DA-6D-Pose-Group/GDR-Net) and [OVE6D](https://github.com/dingdingcai/OVE6D-pos) .
 - 2. The evaluation code is based on [bop_toolkit](https://github.com/thodan/bop_toolkit).
 
