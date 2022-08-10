@@ -38,6 +38,7 @@ This project requires the evaluation code from [bop_toolkit](https://github.com/
 ## Quantitative Evaluation
 Evaluation on the model trained using only PBR images.
 - ``python inference.py --dataset_name tless --gpu_id 0``
+
 Evaluation on the model first trained using the PBR images and finetuned with the combined Synt+Real images
 - ``python inference.py --dataset_name tless --gpu_id 0 --eval_finetune``
 
