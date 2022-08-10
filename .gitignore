@@ -1,8 +1,10 @@
 __pycache__
 .ipynb_checkpoints
 .cache
-checkpoints
-# evaluation/
+events.*
+checkpoints2
 evaluation
 training
 notebook
+cosypose_results
+bop22_default_detections_and_segmentations

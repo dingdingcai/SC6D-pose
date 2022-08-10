@@ -4,14 +4,11 @@ import cv2
 import copy
 import math
 import mmcv
-import json
 import torch
 import random
-import shutil
 import hashlib
 import numpy as np
 from tqdm import tqdm
-from PIL import Image 
 import os.path as osp
 import torch.nn.functional as F
 
@@ -26,13 +23,8 @@ CUR_FILE_DIR = os.path.dirname(__file__)
 PROJ_ROOT = os.path.abspath(os.path.join(CUR_FILE_DIR, '..'))
 sys.path.append(PROJ_ROOT)
 
-RANDOM_SEED = 2022
-random.seed(RANDOM_SEED)
-np.random.seed(RANDOM_SEED)
-torch.random.manual_seed(RANDOM_SEED)
-
-from lib import data_utils as misc
 from lib import gdr_utils as gdr
+from lib import data_utils as misc
 
 from imgaug.augmenters import (Sequential, SomeOf, OneOf, Sometimes, WithColorspace, WithChannels, Noop,
                                Lambda, AssertLambda, AssertShape, Scale, CropAndPad, Pad, Crop, Fliplr,
@@ -59,104 +51,76 @@ COLOR_AUG_CODE = (
     )
 
 class BOP_Dataset(torch.utils.data.Dataset):
-    def __init__(self, 
-        data_dir,
-        dataset_name,
-        dataset_id2cls,
-        rgb_size,
-        mask_size,
-        change_bg_prob,
-        img_width,
-        img_height,
-        use_cache,
-        depth_far,
-        depth_near,
-        depth_bins_num=1000,
-        Rz_rotation_aug=True,
-        uniform_depth_sampling=True,
-        dataset_type=['train_pbr'],
-        # cache_file=None,
-        # cache_prefix=None,
-    ):
-        self.data_dir = data_dir
-        self.width = img_width
-        self.height = img_height
-        self.rgb_size = rgb_size
-        self.mask_size = mask_size
+    def __init__(self, dataset_name, cfg):
         self.dataset_name = dataset_name
-        self.dataset_type = dataset_type
-        self.dataset_id2cls = dataset_id2cls
-        self.num_classes = len(dataset_id2cls)
-
-        # self.cache_prefix = cache_prefix
-
-        self.depth_far = depth_far
-        self.depth_near = depth_near
-        self.depth_bins_num = depth_bins_num
-        self.uniform_depth_sampling = uniform_depth_sampling
-        self.depth_bins_index = np.arange(self.depth_bins_num)
-
-        if self.uniform_depth_sampling:
-             # Space-Uniform Discretization (SUD)
-            self.depth_bins_lb = self.depth_near + (self.depth_far - self.depth_near) *  self.depth_bins_index / self.depth_bins_num      # bin lower bound
-            self.depth_bins_ub = self.depth_near + (self.depth_far - self.depth_near) * (self.depth_bins_index + 1) / self.depth_bins_num # bin upper bound
-            self.depth_bins_val = (self.depth_bins_lb + self.depth_bins_ub) / 2.0  # meddle value of bin
-        else:
-            #  Space-Increasing discretization (SID),  https://arxiv.org/pdf/1806.02446.pdf
-            self.depth_bins_lb = np.exp(np.log(self.depth_near) + np.log(self.depth_far / self.depth_near) * self.depth_bins_index / self.depth_bins_num )
-            self.depth_bins_ub = np.exp(np.log(self.depth_near) + np.log(self.depth_far / self.depth_near) * (self.depth_bins_index + 1) / self.depth_bins_num)
-            self.depth_bins_val = (self.depth_bins_lb + self.depth_bins_ub) / 2.0  # meddle value of bin
-
-        self.depth_bins_lb = torch.as_tensor(self.depth_bins_lb)
-        self.depth_bins_ub = torch.as_tensor(self.depth_bins_ub)
-        self.depth_bins_val = torch.as_tensor(self.depth_bins_val)
-        # self.depth_bins_index = torch.as_tensor(self.depth_bins_index)
-
-        self.color_augmentor = eval(COLOR_AUG_CODE)
-        self.mask_morph = True
-        self.mask_morph_kernel_size = 3
-        self.filter_invalid = True
-        self.img_format = 'BGR'
+        self.rgb_size = cfg.INPUT_IMG_SIZE
+        self.mask_size = cfg.OUTPUT_MASK_SIZE
+        self.data_dir = os.path.join(cfg.DATASET_ROOT, dataset_name)
         
-        self.color_aug_prob = 0.8
-        self.DZI_PAD_SCALE = 1.5
-        self.DZI_SCALE_RATIO = 0.25  # wh scale
-        self.DZI_SHIFT_RATIO = 0.25  # center shift
-        self.BLACK_PADDING_PROB = 0.25
-        self.Rz_rotation_aug = Rz_rotation_aug
-        self.CHANGE_BG_PROB = change_bg_prob
+        self.width = cfg.DATASET_CONFIG[dataset_name]['width']
+        self.height = cfg.DATASET_CONFIG[dataset_name]['height']
+        
+        self.train_set = cfg.DATASET_CONFIG[dataset_name]['train_set']
+
+        assert(isinstance(self.train_set, list)), 'train_set(s) must be a list' # ['train_pbr', 'train_real', ...]
+        self.dataset_id2cls = cfg.DATASET_CONFIG[dataset_name]['id2cls']
+        
+        self.Tz_bins_num = cfg.Tz_BINS_NUM
+        self.Tz_far = cfg.DATASET_CONFIG[dataset_name]['Tz_far']
+        self.Tz_near = cfg.DATASET_CONFIG[dataset_name]['Tz_near']
+        self.Tz_bins_index = np.arange(self.Tz_bins_num)
+
+        self.Tz_bins_lb = self.Tz_near + (self.Tz_far - self.Tz_near) *  self.Tz_bins_index / self.Tz_bins_num      # bin lower bound
+        self.Tz_bins_ub = self.Tz_near + (self.Tz_far - self.Tz_near) * (self.Tz_bins_index + 1) / self.Tz_bins_num # bin upper bound
+        self.Tz_bins_val = (self.Tz_bins_lb + self.Tz_bins_ub) / 2.0  # meddle value of bin
+
+        self.Tz_bins_lb = torch.as_tensor(self.Tz_bins_lb)
+        self.Tz_bins_ub = torch.as_tensor(self.Tz_bins_ub)
+        self.Tz_bins_val = torch.as_tensor(self.Tz_bins_val)
+
+        self.num_classes = len(self.dataset_id2cls)
+
+        self.img_format = 'BGR'
+        self.mask_morph = True
+        self.filter_invalid = True
+        self.mask_morph_kernel_size = 3
+        self.color_augmentor = eval(COLOR_AUG_CODE)
+        
+        self.DZI_PAD_SCALE = cfg.ZOOM_PAD_SCALE
+        self.DZI_SCALE_RATIO = cfg.ZOOM_SCALE_RATIO  # wh scale
+        self.DZI_SHIFT_RATIO = cfg.ZOOM_SHIFT_RATIO  # center shift
+        self.Rz_rotation_aug = cfg.RZ_ROTATION_AUG
+        self.CHANGE_BG_PROB = cfg.CHANGE_BG_PROB
+        self.COLOR_AUG_PROB = cfg.COLOR_AUG_PROB
+        self.PEmap_normalize = cfg.PEMAP_NORMALIZE
 
         self.TRUNCATE_FG = False
         self.BG_KEEP_ASPECT_RATIO = True
-        self.BG_TYPE = "VOC_table"      # VOC_table | coco | VOC | SUN2012
-        # self.BG_ROOT = "/scratch/project_2003593/Dataspace/VOCdevkit/VOC2012/"  # "datasets/coco/train2017/"
         self.NUM_BG_IMGS = 10000
+        self.BG_TYPE = "VOC_table"      # VOC_table | coco | VOC | SUN2012
+        self.BG_ROOT = cfg.VOC_BG_ROOT  # "datasets/coco/train2017/"
 
-        self.BG_ROOT = "/home/hdd/Dingding/Dataspace/VOCdevkit/VOC2012/"  # "datasets/coco/train2017/"
-
-        self.use_cache = use_cache
+        self.use_cache = cfg.USE_CACHE
         self.cache_dir = os.path.join(CUR_FILE_DIR, ".cache")  # .cache
 
-        hashed_file_name = hashlib.md5(("_".join(self.dataset_type)
-                                        + "dataset_dicts_{}_{}_{}".format(self.dataset_name, self.data_dir, __name__)
-                                        ).encode("utf-8")).hexdigest()
-        cache_path = os.path.join(self.cache_dir, "dataset_dicts_{}_{}.pkl".format(self.dataset_name, hashed_file_name))
-        
-        print(self.dataset_type, self.dataset_name, self.data_dir, __name__)
-        cache_path = '/home/dingding/Workspace/CDD/SC6D_release/dataset/.cache/dataset_dicts_tless_16be8c80cd211550f7d9529182b65289.pkl'
+        hashed_file_name = hashlib.md5(("_".join(self.train_set)
+            + "dataset_dicts_{}_{}_{}".format(self.dataset_name, self.data_dir, __name__)
+        ).encode("utf-8")).hexdigest()
+        cache_path = os.path.join(self.cache_dir, 
+            "dataset_dicts_{}_{}_{}.pkl".format(self.dataset_name, "_".join(self.train_set), hashed_file_name))
 
         self.dataset_dicts = list() # the whole dataset information
         if self.use_cache and os.path.exists(cache_path):
             logger.info("load cached dataset dicts from {}".format(cache_path))
             self.dataset_dicts = mmcv.load(cache_path)
         else:
-            for img_type in self.dataset_type:
+            for img_type in self.train_set:
                 image_counter = 0
                 instance_counter = 0
                 train_dir = os.path.join(self.data_dir, img_type)
                 logger.info("preparing data from {}".format(img_type))
                 for scene in sorted(os.listdir(train_dir)):
-                    if not scene.startswith('00'):  #  starts with '0000xx' for BOP datasets
+                    if not scene.startswith('00'):  #  BOP images start with '0000xx' 
                         continue
                     scene_id = int(scene)
                     scene_dir = os.path.join(train_dir, scene)
@@ -185,34 +149,27 @@ class BOP_Dataset(torch.utils.data.Dataset):
                         for anno_idx, anno_dict in enumerate(scene_gt_pose_dict[img_id_str]):
                             obj_id = anno_dict["obj_id"]
                             if obj_id not in self.dataset_id2cls: # ignore the non-target objects 
-                                # print(obj_id, self.dataset_id2cls, os.path.join(scene_dir, "scene_gt.json"))
                                 continue
                             R = np.array(anno_dict["cam_R_m2c"], dtype="float32").reshape(3, 3)
                             t = np.array(anno_dict["cam_t_m2c"], dtype="float32") / 1000.0
                             
-                            # bbox_obj = scene_gt_bbox_dict[img_id_str][anno_idx]["bbox_obj"]
                             bbox_visib = scene_gt_bbox_dict[img_id_str][anno_idx]["bbox_visib"]
                             x1, y1, w, h = bbox_visib
                             if self.filter_invalid:
                                 if h <= 1 or w <= 1:
-                                    # self.num_instances_without_valid_box += 1
                                     continue
-                            # mask_file = os.path.join(scene_dir, "mask/{:06d}_{:06d}.png".format(img_id_int, anno_idx))
-                            # assert os.path.exists(mask_file), mask_file
+                                
                             mask_visib_file = os.path.join(scene_dir, "mask_visib/{:06d}_{:06d}.png".format(img_id_int, anno_idx))
                             assert os.path.exists(mask_visib_file), mask_visib_file
                             mask_single = mmcv.imread(mask_visib_file, "unchanged").astype(bool).astype(np.uint8)
                             area = mask_single.sum()
                             if area < 50:  # filter out too small or nearly invisible instances
-                                # self.num_instances_without_valid_segmentation += 1
                                 continue
                             if self.mask_morph:
                                 kernel = np.ones((self.mask_morph_kernel_size, self.mask_morph_kernel_size))
                                 mask_single = cv2.morphologyEx(mask_single.astype(np.uint8), cv2.MORPH_CLOSE, kernel) # remove holes
                                 mask_single = cv2.morphologyEx(mask_single, cv2.MORPH_OPEN, kernel)  # remove outliers 
-                            # visib_fract = scene_gt_bbox_dict[img_id_str][anno_idx].get("visib_fract", 1.0)
-                            # mask_full = mmcv.imread(mask_file, "unchanged").astype(np.bool).astype(np.uint8)
-                            # mask_full_rle = misc.binary_mask_to_rle(mask_full, compressed=True)
+
                             if obj_id not in view_inst_count:
                                 view_inst_count[obj_id] = 0
                             view_inst_count[obj_id] += 1  # accumulate the object number per instance in a single image
@@ -223,7 +180,6 @@ class BOP_Dataset(torch.utils.data.Dataset):
                                 "bbox": bbox_visib,  
                                 "bbox_mode": BoxMode.XYWH_ABS,
                                 "segmentation": misc.binary_mask_to_rle(mask_single, compressed=True),
-                                # "visib_fract": visib_fract,
                             }
                             view_insts.append(inst)
                         if len(view_insts) == 0:  # filter im without anno
@@ -283,19 +239,15 @@ class BOP_Dataset(torch.utils.data.Dataset):
         obj_id = inst_infos['obj_id']
         
         image_file = dataset_dict["file_name"]
-
-        # if self.cache_prefix is not None:
-        #     image_file = image_file.replace(self.cache_prefix, self.data_dir)
-        
         if not os.path.exists(image_file):
             return None
         
         image = mmcv.imread(image_file, 'color', self.img_format)
-        
         ### RGB augmentation ###
-        if np.random.rand() < self.color_aug_prob:
+        if np.random.rand() < self.COLOR_AUG_PROB:
             image = self.color_augmentor.augment_image(image)
         im_H, im_W = image.shape[:2]
+        mask = misc.cocosegm2mask(inst_infos["segmentation"], im_H, im_W)
 
         obj_R = inst_infos['R'].astype("float32").reshape(3, 3)
         obj_t = inst_infos['t'].astype("float32").reshape(3,)
@@ -315,15 +267,6 @@ class BOP_Dataset(torch.utils.data.Dataset):
                                                     shift_ratio=self.DZI_SHIFT_RATIO, 
                                                     pad_scale=self.DZI_PAD_SCALE,
                                                     )  # Dynamic zoom-in see the paper GDR-Net
-
-        mask = misc.cocosegm2mask(inst_infos["segmentation"], im_H, im_W)
-
-        if np.random.rand() < self.BLACK_PADDING_PROB: # replace the background (beyond bbox) with zeros
-            image[:by, :] = 0    # top side
-            image[:, :bx] = 0    # left side
-            image[by+bh:, :] = 0 # bottom side
-            image[:, bx+bw:] = 0 # right side
-
         #### randomly replace the background if an image contains multiple instances of the same object ####
         obj_inst_count = dataset_dict.pop('obj_inst_count')
         if (obj_inst_count[obj_id] > 2) and (np.random.rand() < self.CHANGE_BG_PROB):
@@ -341,14 +284,19 @@ class BOP_Dataset(torch.utils.data.Dataset):
 
         T_img2roi = misc.transform_to_local_ROIcrop(bbox_center=bbox_center, bbox_scale=bbox_scale, zoom_scale=self.rgb_size)
         roi_camK = T_img2roi.numpy() @ cam_K
-        roi_uv = misc.normalized_uv(im_hei=self.rgb_size, im_wid=self.rgb_size, cam_K=roi_camK) # 2xHxW
+        roi_PEmap = misc.generate_PEmap(im_hei=self.rgb_size, im_wid=self.rgb_size, cam_K=roi_camK) # 2xHxW
+
+        if self.PEmap_normalize:  # normalize the PEmap by moving the principal point from the left upper corner to the crop center
+            PE_normK = roi_camK.copy()
+            PE_normK[:2, 2] += self.rgb_size / 2 # shift the principal points the region center
+            roi_PEmap = misc.generate_PEmap(im_hei=self.rgb_size, im_wid=self.rgb_size, cam_K=PE_normK) # 2xHxW
         
-        dataset_dict["obj_cls"] = self.dataset_id2cls[obj_id]
-        dataset_dict["roi_uv"] = torch.as_tensor(roi_uv, dtype=torch.float32).contiguous()     # 2xHxW
-        dataset_dict["roi_mask"] = torch.as_tensor(roi_mask, dtype=torch.float32).contiguous() # HxW 
-        dataset_dict["roi_image"] = torch.as_tensor(roi_img, dtype=torch.float32).contiguous() # 3xHxW
-        dataset_dict["roi_camK"] = torch.as_tensor(roi_camK, dtype=torch.float32).squeeze()    # 3x3
-        dataset_dict["T_img2roi"] = torch.as_tensor(T_img2roi, dtype=torch.float32).squeeze()  # 3x3
+        dataset_dict["roi_camK"] = torch.as_tensor(roi_camK, dtype=torch.float32).squeeze()      # 3x3
+        dataset_dict["T_img2roi"] = torch.as_tensor(T_img2roi, dtype=torch.float32).squeeze()    # 3x3
+        dataset_dict["roi_image"] = torch.as_tensor(roi_img, dtype=torch.float32).contiguous()   # 3xHxW
+        dataset_dict["roi_mask"] = torch.as_tensor(roi_mask, dtype=torch.float32).contiguous()   # H/4xW/4 
+        dataset_dict["roi_PEmap"] = torch.as_tensor(roi_PEmap, dtype=torch.float32).contiguous() # 2xHxW
+        dataset_dict["obj_cls"] = torch.as_tensor(self.dataset_id2cls[obj_id], dtype=torch.int64)
 
         dataset_dict["roi_obj_t"] = torch.as_tensor(obj_t, dtype=torch.float32)          # object GT 3D location
         dataset_dict["roi_obj_R"] = torch.as_tensor(obj_R, dtype=torch.float32)          # object GT egocentric 3D orientation
@@ -361,9 +309,8 @@ class BOP_Dataset(torch.utils.data.Dataset):
         
         dataset_dict["roi_delta_tz"] = roi_delta_tz  # scale-invariant z-axis translation
         dataset_dict["roi_delta_pxpy"] =torch.as_tensor(roi_delta_pxpy, dtype=torch.float32)    # object GT scale-invariant projection shift delta_pxpy
-        dataset_dict["roi_delta_tz_cls"] = max(0, ((roi_delta_tz - self.depth_bins_lb) > 0).sum() - 1) # 0 <= cls <= K-1, gt depth class label
+        dataset_dict["roi_delta_tz_cls"] = max(0, ((roi_delta_tz - self.Tz_bins_lb) > 0).sum() - 1) # 0 <= cls <= K-1, gt Tz class label
         
-
         if self.Rz_rotation_aug: # rotation augmentation
             Rz_index = torch.randperm(4)[0] # 0:0˚, 1:90˚, 2:180˚, 3:270˚
             Rz_rad = torch.tensor([0.0, 0.0, math.pi * Rz_index * 0.5]) # 0˚, 90˚, 180˚, 270˚
@@ -565,63 +512,15 @@ class BOP_Dataset(torch.utils.data.Dataset):
         return bg_img
 
 
-if __name__ == "__main__":
-    
-    import bop_config as bop_cfg
-    from bop_config import SC6D_DATASET_CONFIG as sc6d_cfg
-
-    # data_dir = "/run/nvme/job_12355061/data" # tless
-    # data_dir = '/run/nvme/job_12359017/data'   # itodd, lmo, icbin
+if __name__ == "__main__":    
+    import config as bop_cfg
 
     dataset_name = 'tless'
     # dataset_name = 'itodd'
-    # dataset_name = 'lmo'
-    # dataset_name = 'icbin'
     # dataset_name = 'ycbv'
-    # dataset_name = 'tudl'
-    # dataset_name = 'hb'
 
-    def batch_collation(batch):
-        """
-        batch: list of [data_dict]
-        """
-        new_batch = dict()
-        for each_bat in batch:
-            for key, val in each_bat.items():
-                if key not in new_batch:
-                    new_batch[key] = list()
-                new_batch[key].append(val)
-        for key, lst in new_batch.items():
-            try:
-                new_batch[key] = torch.stack(lst, dim=0)
-            except:
-                pass
-        return new_batch
-
-
-    data_dir = os.path.join(bop_cfg.BOP_DATASET_ROOT, dataset_name)
-
-    train_dataset = BOP_Dataset(data_dir=data_dir,
-                                dataset_name=dataset_name,
-                                rgb_size=256,
-                                mask_size=64,
-                                use_cache=True,
-                                change_bg_prob=0.5,
-                                depth_bins_num=1000,
-                                Rz_rotation_aug=True,
-                                uniform_depth_sampling=True,
-                                img_width=sc6d_cfg[dataset_name]['width'],
-                                img_height=sc6d_cfg[dataset_name]['height'],
-                                depth_far=sc6d_cfg[dataset_name]['dep_far'],
-                                depth_near=sc6d_cfg[dataset_name]['dep_near'],
-                                dataset_type=sc6d_cfg[dataset_name]['type'],
-                                dataset_id2cls=sc6d_cfg[dataset_name]['id2cls'],
-                                # cache_file=sc6d_cfg[dataset_name].get('cache_file', None),
-                                # cache_prefix=sc6d_cfg[dataset_name].get('cache_prefix', None),
-    )
+    train_dataset = BOP_Dataset(dataset_name=dataset_name, cfg=bop_cfg)
     print('image_number: ', len(train_dataset))
-    # print('cache_file:', sc6d_cfg[dataset_name].get('cache_file', None))
-    # print('cache_prefix:', sc6d_cfg[dataset_name].get('cache_prefix', None))
 
     data_loader = torch.utils.data.DataLoader(
             train_dataset, 
@@ -629,7 +528,7 @@ if __name__ == "__main__":
             shuffle=True,
             num_workers=8, 
             pin_memory=True,
-            collate_fn=batch_collation,
+            collate_fn=train_dataset.collate_fn,
             )
 
     for batch_data in data_loader:
@@ -649,70 +548,4 @@ if __name__ == "__main__":
         print(delta_pxpy)
         print('#############################')
 
-
-dv = [5,7,11,12,18,21,23,
-26,
-39,
-41,
-42,
-43,
-49,
-56,
-64,
-66,
-67,
-69,
-72,
-74,
-75,
-77,
-83,
-85,
-86,
-90,
-92,
-93,
-105,
-111,
-112,
-118,
-121,
-122,
-124,
-128,
-132,
-134,
-137,
-138,
-139,
-143,
-144,
-146,
-147,
-148,
-152,
-154,
-156,
-162,
-164,
-168,
-176,
-188,
-196,
-217,
-219,
-223,
-229,
-238,
-239,
-245
-,267
-,272
-,278
-,283
-,289
-,293
-,300
-,332
-,335]
 

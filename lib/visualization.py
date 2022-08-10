@@ -1,4 +1,5 @@
 import torch
+import matplotlib.pyplot as plt
 
 def normalize_visulization(depth):
     
@@ -14,3 +15,12 @@ def normalize_visulization(depth):
     mean_depth = 0.5*(min_dep + max_dep)* mask
     depth = depth - mean_depth
     return depth
+
+def tb_figure(img, normalize=False):
+    plt_fig = plt.figure()        
+    if normalize:
+        plt.imshow(normalize_visulization(img))
+    else:
+        plt.imshow(img)
+    plt.close()
+    return plt_fig

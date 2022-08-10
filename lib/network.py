@@ -303,18 +303,18 @@ class SC6D_Network(nn.Module):
         )
 
 
-    def forward(self, que_rgb, que_uv, rotation_so3, obj_idx):
+    def forward(self, que_rgb, que_PEmap, rotation_so3, obj_idx):
         """
         inputs:
             que_rgb: object RGB image, Bx3xHxW
-            que_uv: pixel coordinate of RGB image, Bx2xHxW
+            que_PEmap: pixel coordinate of RGB image (positional encoding map), Bx2xHxW
             rotation_so3: 3D rotation samplings, Bx9xS
         """
         
         so3_sample_emb = self.so3_encoder(input=rotation_so3, obj_idx=obj_idx)            # Bx6xR => BxCxR 
         
-        rgb_uv = torch.cat([que_rgb, que_uv], dim=1)
-        rgb_emb, visib_msk = self.rgb_encoder(input=rgb_uv, decoder_idx=obj_idx) # BxCx64x64, Bx1x64x64
+        rgb_PEmap = torch.cat([que_rgb, que_PEmap], dim=1)
+        rgb_emb, visib_msk = self.rgb_encoder(input=rgb_PEmap, decoder_idx=obj_idx) # BxCx64x64, Bx1x64x64
         
         img_rot_emb, delta_Pxy, cls_Tz = self.pose_decoder(rgb=rgb_emb, mask=visib_msk.sigmoid()) # BxC, Bx2, Bx1, BxK
 
@@ -366,6 +366,8 @@ class IPDF_Encoder(nn.Module):
 
 class SC6D_Network_IPDF(nn.Module):
     """
+    Implicit-PDF based SO(3) orientation estimation
+
     joint RGB and XYZ for training
     dense pixel-wise latent PnP;
     Zooming invariant Distance Discretization Light MultiHead SO3Encoder with MultiHead ResNet18_RGB_UV
@@ -375,21 +377,15 @@ class SC6D_Network_IPDF(nn.Module):
                        so3_input_dim=9, 
                        so3_emb_dim=32, 
                        rgb_emb_dim=32,
-                       depth_bins_num=200
+                       Tz_bins_num=200
                        ):
         super(SC6D_Network_IPDF, self).__init__()
         self.rgb_emb_dim = rgb_emb_dim
         self.so3_emb_dim = so3_emb_dim       # the embedding dimension of 3D rotation samples
         self.num_classes = num_classes
         self.so3_input_dim = so3_input_dim   # dimention of rotation parameters (R6d:6 or Rmat:9)
-        self.depth_bins_num = depth_bins_num
+        self.Tz_bins_num = Tz_bins_num
         
-        # self.so3_encoder = SO3_Encoder(
-        #     emb_dim=1,
-        #     input_dim=self.so3_input_dim + self.so3_emb_dim,
-        #     num_classes=1,
-        # )     # Bx so3_input_dim xN => Bx so3_emb_dim xN
-
         self.so3_encoder = IPDF_Encoder(
             input_dim=self.so3_input_dim + self.so3_emb_dim,
             num_classes=self.num_classes,
@@ -404,39 +400,27 @@ class SC6D_Network_IPDF(nn.Module):
         self.pose_decoder = PoseDecoder(
             rgb_emb_dim=self.rgb_emb_dim,
             R6d_emb_dim=self.so3_emb_dim,
-            depth_bins_num=self.depth_bins_num,
+            depth_bins_num=self.Tz_bins_num,
         )
 
 
-    def forward(self, que_rgb, que_uv, rotation_so3, obj_idx):
+    def forward(self, que_rgb, que_PEmap, rotation_so3, obj_idx):
         """
         inputs:
             que_rgb: object RGB image, Bx3xHxW
-            que_xyz: object surface coordinate image, Bx3x64x64
-            que_uv: pixel coordinate of RGB image, Bx2xHxW
-            # que_xyz: visible surface point coordinate, Bx3xhxw
-            que_R6d: 3D rotations of the input que_rgb, Bx6x1
-
-            key_xyz: object surface point coordinate, Bx3xK
-            key_R6d: uniformly sampled 3D rotations, Bx6xR
-
-            t3_xyz: uniform sampled 3D translation steps, Bx3xT
+            que_PEmap: pixel coordinate of RGB image (positional encoding map), Bx2xHxW
+            rotation_so3: 3D rotation samplings, Bx9xS
         """
-
-        assert (que_uv.shape[-1] == que_rgb.shape[-1]), (que_uv.shape, que_rgb.shape)
         
-        rgb_uv = torch.cat([que_rgb, que_uv], dim=1)
-        rgb_emb, visib_msk = self.rgb_encoder(input=rgb_uv, decoder_idx=obj_idx) # BxCx64x64, Bx1x64x64
+        rgb_PEmap = torch.cat([que_rgb, que_PEmap], dim=1)
+        rgb_emb, visib_msk = self.rgb_encoder(input=rgb_PEmap, decoder_idx=obj_idx) # BxCx64x64, Bx1x64x64
         
-        R6d_emb, delta_Pxy, cls_Tz = self.pose_decoder(rgb=rgb_emb, mask=visib_msk.sigmoid()) # BxC, Bx2, Bx1, BxK
+        img_rot_emb, delta_Pxy, cls_Tz = self.pose_decoder(rgb=rgb_emb, mask=visib_msk.sigmoid()) # BxC, Bx2, Bx1, BxK
 
-        R6d_emb = F.normalize(R6d_emb, dim=1)
-        rgb_emb_rot = torch.cat([R6d_emb[..., None].repeat(1, 1, rotation_so3.shape[-1]), rotation_so3], dim=1) # BxCxR, Bx9xR => Bx(C+9)xR
-
-        # log_prob = self.so3_encoder(input=rgb_emb_rot, obj_idx=torch.zeros_like(obj_idx))            # Bx6xR => BxCxR 
+        img_rot_emb = F.normalize(img_rot_emb, dim=1)
+        rgb_emb_rot = torch.cat([img_rot_emb[..., None].repeat(1, 1, rotation_so3.shape[-1]), rotation_so3], dim=1) # BxCxR, Bx9xR => Bx(C+9)xR
 
         log_prob = self.so3_encoder(input=rgb_emb_rot, obj_idx=obj_idx).squeeze(1)            # Bx6xR => BxCxR 
 
-        
         return visib_msk, delta_Pxy, cls_Tz, log_prob
 
