@@ -89,7 +89,7 @@ class ResNet34_AsymUNet(nn.Module):
             layer4_1x1=convrelu(512, 512, kernel_size=1, stride=1),
             conv_up3=convrelu(256 + 512, 512, kernel_size=3, stride=1, padding=1),
             conv_up2=convrelu(128 + 512, 256, kernel_size=3, stride=1, padding=1),
-            conv_last=nn.Conv2d(256, self.out_feat_dim, kernel_size=1, stride=1),
+            conv_last=nn.Conv2d(256, self.out_feat_dim+1, kernel_size=1, stride=1),
         ) for _ in range(n_decoders)]
 
         # register decoder modules
