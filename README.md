@@ -35,6 +35,8 @@ This project requires the evaluation code from [bop_toolkit](https://github.com/
 
 
 ## Inference
+Download the default predicted (by [CosyPose](https://github.com/ylabbe/cosypose)) detection results from BOP Challenge 2022.
+- ``wget https://bop.felk.cvut.cz/media/data/bop_datasets_extra/bop22_default_detections_and_segmentations.zip``
 
 Decompress the detection results provided by the BOP Challenge 2022.
 - ``unzip bop22_default_detections_and_segmentations.zip``
