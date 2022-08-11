@@ -64,20 +64,10 @@ class SO3_Encoder(nn.Module):
 
 
 class ResNet34_AsymUNet(nn.Module):
-    def __init__(self, out_feat_dim=64, output_amod_mask=False, rgb_input_dim=3, n_decoders=1):
+    def __init__(self, out_feat_dim=64, rgb_input_dim=3, n_decoders=1):
         super().__init__()
-
         self.out_feat_dim = out_feat_dim
-        self.output_amod_mask = output_amod_mask
-
-        if output_amod_mask:
-            self.out_feat_dim += 17
-        else:
-            self.out_feat_dim += 1
-        #  shared encoder
-
         self.base_model = model_zoo.resnet34(pretrained=True)
-
         if rgb_input_dim != 3:
             self.layer0 = nn.Sequential(
                 nn.Conv2d(rgb_input_dim, 64, kernel_size=7, stride=2, padding=3, bias=False),
@@ -93,8 +83,6 @@ class ResNet34_AsymUNet(nn.Module):
         self.layer4 = nn.Sequential(*list(self.base_model.children())[7:8]) # 256xH/8xW/8  -> 512xH/16xW/16
 
         #  n_decoders
-        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-
         self.decoders = [dict(
             layer2_1x1=convrelu(128, 128, kernel_size=1, stride=1),
             layer3_1x1=convrelu(256, 256, kernel_size=1, stride=1),
@@ -108,8 +96,6 @@ class ResNet34_AsymUNet(nn.Module):
         for i, decoder in enumerate(self.decoders):
             for key, val in decoder.items():
                 setattr(self, f'decoder{i}_{key}', val)
-
-        self.shuffle = nn.PixelShuffle(4)
 
     def forward(self, input, decoder_idx):
         # encoder
@@ -137,22 +123,13 @@ class ResNet34_AsymUNet(nn.Module):
             layer_projection = decoder[f'layer2_1x1'](layer_slice) # Bx128x64x64 => Bx128x64x64
             stem_x = torch.cat([stem_x, layer_projection], dim=1)  # Bx(512+128)x64x64
             stem_x = decoder[f'conv_up2'](stem_x)                  # Bx(512+128)x64x64 => Bx256x64x64
-
             x_out.append(decoder['conv_last'](stem_x))             # Bx256x64x64 => BxCx64x64
 
         x_out = torch.cat(x_out, dim=0)  # BxCx64x64
 
-        if self.output_amod_mask:
-            rgb_emb = x_out[:, :-17]       # BxCx64x64
-            visib_msk = x_out[:, -17:-16]  # Bx1x64x64
-            amodal_msk = x_out[:, -16:]    # Bx16x64x64
-            amodal_msk = self.shuffle(amodal_msk)  # Bx1x256x256
-            return rgb_emb, visib_msk, amodal_msk
-
-        else:
-            rgb_emb = x_out[:, :-1]         # BxCx64x64
-            visib_msk = x_out[:, -1:]       # Bx1x64x64
-            return rgb_emb, visib_msk            
+        rgb_emb = x_out[:, :-1]         # BxCx64x64
+        visib_msk = x_out[:, -1:]       # Bx1x64x64
+        return rgb_emb, visib_msk            
 
 
 class PoseDecoder(nn.Module):
@@ -299,9 +276,7 @@ class SC6D_Network(nn.Module):
             rgb_emb_dim=self.rgb_emb_dim,
             so3_emb_dim=self.so3_emb_dim,
             Tz_bins_num=self.Tz_bins_num,
-
         )
-
 
     def forward(self, que_rgb, que_PEmap, rotation_so3, obj_idx):
         """
