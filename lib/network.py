@@ -81,7 +81,7 @@ class ResNet34_AsymUNet(nn.Module):
         self.layer2 = nn.Sequential(*list(self.base_model.children())[5:6]) # 64xH/2xW/2   -> 128xH/4xW/4
         self.layer3 = nn.Sequential(*list(self.base_model.children())[6:7]) # 128xH/4xW/4  -> 256xH/8xW/8
         self.layer4 = nn.Sequential(*list(self.base_model.children())[7:8]) # 256xH/8xW/8  -> 512xH/16xW/16
-
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
         #  n_decoders
         self.decoders = [dict(
             layer2_1x1=convrelu(128, 128, kernel_size=1, stride=1),
