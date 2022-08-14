@@ -34,7 +34,7 @@ USE_CACHE = True
 ZOOM_PAD_SCALE = 1.5
 ZOOM_SCALE_RATIO = 0.25
 ZOOM_SHIFT_RATIO = 0.25   # center shift
-COLOR_AUG_PROB = 0.5
+COLOR_AUG_PROB = 0.8
 CHANGE_BG_PROB = 0.8      # the prob for changing the background
 SO3_TRAINING_SAMPLINGS = 5000
 
