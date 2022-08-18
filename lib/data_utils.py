@@ -421,9 +421,8 @@ def generate_PEmap(im_hei, im_wid, cam_K):
 
     homo_uv = torch.stack([xx, yy, torch.ones_like(xx)], dim=0).type(torch.float32)
     homo_uvk = (K_inv @ homo_uv.view(3, -1)).view(3, im_hei, im_wid) # 3xHxW
-    homo_uv = homo_uvk[:2] # 2xHxW
-
-    return homo_uv
+    
+    return homo_uvk[:2] # 2xHxW
 
 def transform_to_local_ROIcrop(bbox_center, bbox_scale, zoom_scale=256):
     """
