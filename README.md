@@ -34,7 +34,7 @@ Our evaluation is conducted on three benchmark datasets all downloaded from [BOP
 This project requires the evaluation code from [bop_toolkit](https://github.com/thodan/bop_toolkit).
 
 ## Pre-trained Models
-The pre-trained models can be downloaded [here](https://1drv.ms/u/s!AsQt5otkUsREavqKuyVqXeS0twA?e=pkyqow).
+The pre-trained models can be downloaded [here](https://1drv.ms/u/s!AsQt5otkUsREavqKuyVqXeS0twA?e=pkyqow), all the models are saved to the ``checkpoints`` directory, for example, ``checkpoints/ycb-v, checkpoints/tless, checkpoints/itodd``.
 
 ## Inference
 Download the [predicted detection results](https://bop.felk.cvut.cz/media/data/bop_datasets_extra/bop22_default_detections_and_segmentations.zip) from BOP Challenge 2022 and decompress it to the root directory.
