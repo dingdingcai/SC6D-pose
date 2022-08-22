@@ -4,7 +4,7 @@ __pycache__
 bop22_default_detections_and_segmentations
 evaluation
 train
-checkpoints/*.pth
+*.pth
 cosypose_results
 notebook
 config2*

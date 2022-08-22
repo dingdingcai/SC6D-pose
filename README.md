@@ -48,7 +48,7 @@ Evaluation on the model first trained using the PBR images and finetuned with th
 
 ## Training
 To train SC6D, download the [VOC2012](http://host.robots.ox.ac.uk/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar) dataset and set the "VOC_BG_ROOT" (in config.py) to the VOC2012 directory
-- ``bash training.sh``  # change the "NAME" variable for training different dataset.
+- ``bash training.sh``  # change the "NAME" variable for a new dataset.
 
 
 ## Acknowledgement
